@@ -1,0 +1,248 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="theme-color" content="#0a0f2c">
+<meta name="description" content="大学校园活动体验页：欢迎页 → 三句话 → 26 个活动气泡 → 活动详情页">
+<title>欢迎进入大学校园</title>
+
+<!-- 有意思的字体（联网时生效；离线自动回退到系统里的手写/艺术字体） -->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=ZCOOL+KuaiLe&family=Ma+Shan+Zheng&display=swap" rel="stylesheet">
+
+<link rel="stylesheet" href="css/style.css">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='88'>🎓</text></svg>">
+</head>
+<body>
+
+<!-- 全局背景：极光 + 星星 -->
+<div class="aurora" aria-hidden="true">
+  <span class="blob blob-1"></span>
+  <span class="blob blob-2"></span>
+  <span class="blob blob-3"></span>
+</div>
+<div id="stars" class="stars" aria-hidden="true"></div>
+
+<!-- ================= 界面 1：欢迎页 ================= -->
+<section class="scene scene-gate is-active" id="scene-gate">
+
+  <!-- 贴图（emoji 贴纸 + 手绘感光斑） -->
+  <div class="sticker-layer" aria-hidden="true">
+    <span class="st" style="--x:6%;--y:14%;--s:clamp(38px,7vw,62px);--d:5.4s;--dl:0s">🎓</span>
+    <span class="st" style="--x:13%;--y:62%;--s:clamp(30px,5.5vw,52px);--d:6.2s;--dl:.6s">📚</span>
+    <span class="st" style="--x:4%;--y:82%;--s:clamp(26px,4.5vw,44px);--d:4.8s;--dl:1.1s">✏️</span>
+    <span class="st" style="--x:22%;--y:30%;--s:clamp(22px,4vw,38px);--d:7s;--dl:.3s">☕</span>
+    <span class="st" style="--x:78%;--y:12%;--s:clamp(34px,6.5vw,58px);--d:5.8s;--dl:.9s">🎈</span>
+    <span class="st" style="--x:88%;--y:40%;--s:clamp(30px,5vw,50px);--d:6.6s;--dl:.2s">🏀</span>
+    <span class="st" style="--x:82%;--y:74%;--s:clamp(34px,6vw,56px);--d:5.2s;--dl:1.4s">🎸</span>
+    <span class="st" style="--x:62%;--y:86%;--s:clamp(24px,4.5vw,42px);--d:6.9s;--dl:.5s">🌱</span>
+    <span class="st" style="--x:34%;--y:90%;--s:clamp(26px,4.5vw,44px);--d:5.6s;--dl:1.7s">🎒</span>
+    <span class="st" style="--x:68%;--y:22%;--s:clamp(20px,3.6vw,34px);--d:4.4s;--dl:1.2s">✨</span>
+    <span class="st st-star" style="--x:47%;--y:9%;--s:clamp(18px,3.2vw,30px);--d:3.6s;--dl:.8s">⭐</span>
+  </div>
+
+  <div class="gate-inner">
+    <p class="kicker">CAMPUS · 大学校园 · 2026</p>
+
+    <h1 class="title" aria-label="欢迎进入大学校园">
+      <span class="ch" style="--i:0">欢</span><span class="ch" style="--i:1">迎</span><span class="ch" style="--i:2">进</span><span class="ch" style="--i:3">入</span><span class="ch" style="--i:4">大</span><span class="ch" style="--i:5">学</span><span class="ch" style="--i:6">校</span><span class="ch" style="--i:7">园</span>
+    </h1>
+
+    <p class="subtitle">一张校园地图，正在为你展开</p>
+
+    <button class="enter-btn" id="btn-enter" type="button">
+      <span class="enter-label">进　入</span>
+      <span class="sheen" aria-hidden="true"></span>
+    </button>
+
+    <p class="hint-small">轻触「进入」，开始你的校园之旅</p>
+  </div>
+</section>
+
+<!-- ================= 界面 2：三句话 ================= -->
+<section class="scene scene-lines" id="scene-lines">
+  <div class="page-bar">
+    <button class="back-btn" type="button" data-back="welcome">
+      <span class="back-ico" aria-hidden="true">←</span> 返回
+    </button>
+  </div>
+
+  <div class="lines" id="lines">
+    <p class="line" data-line="1">进入了大学</p>
+    <p class="line" data-line="2">就代表了无限的机会和试错</p>
+    <p class="line" data-line="3">有很多的活动在等待着你</p>
+  </div>
+
+  <button class="skip-btn" id="btn-skip" type="button">轻触继续 <span aria-hidden="true">›</span></button>
+</section>
+
+<!-- ================= 界面 3：活动气泡 ================= -->
+<section class="scene scene-bubbles" id="scene-bubbles">
+
+  <header class="bubble-header">
+    <div class="bar-row">
+      <button class="back-btn" type="button" data-back="intro">
+        <span class="back-ico" aria-hidden="true">←</span> 返回
+      </button>
+      <span class="counter">已探索 <b id="count">0</b> / <b id="total">26</b></span>
+    </div>
+    <h2>看看都有什么活动可以参加</h2>
+    <p class="counter-sub">拖动屏幕，点开任意一个气泡</p>
+  </header>
+
+  <div class="field-wrap" id="field-wrap">
+    <div class="field" id="field"></div>
+  </div>
+
+  <footer class="bubble-footer">
+    <span class="foot-hint" id="foot-hint">按住拖动查看更多气泡 · 点哪个都可以</span>
+    <button class="mini-btn" id="btn-recenter" type="button">回到中间</button>
+  </footer>
+
+  <div class="toast" id="toast" hidden></div>
+</section>
+
+<!-- ================= 界面 4：活动详情页 ================= -->
+<section class="scene scene-detail" id="scene-detail">
+  <div class="detail-glow" aria-hidden="true">
+    <span class="detail-blob detail-blob-1"></span>
+    <span class="detail-blob detail-blob-2"></span>
+  </div>
+
+  <div class="page-bar">
+    <button class="back-btn" type="button" data-back="activities">
+      <span class="back-ico" aria-hidden="true">←</span> 返回
+    </button>
+    <span class="detail-index" id="detail-index">第 1 / 26 个</span>
+  </div>
+
+  <article class="detail-scroll" id="detail-scroll">
+    <!-- 主贴纸 + 环绕贴纸 -->
+    <div class="detail-hero">
+      <span class="hero-emoji" id="detail-emoji">💻</span>
+      <div class="hero-stickers" id="detail-stickers" aria-hidden="true"></div>
+    </div>
+
+    <div class="detail-tags">
+      <span class="detail-cat" id="detail-cat">程序设计</span>
+      <span class="detail-status" id="detail-status">报名中</span>
+    </div>
+
+    <h2 class="detail-title" id="detail-title">活动标题</h2>
+    <p class="detail-source" id="detail-source">发布方</p>
+    <p class="detail-summary" id="detail-summary">一句话简介</p>
+
+    <h3 class="detail-sub">活动信息</h3>
+    <ul class="fact-list" id="detail-facts"></ul>
+
+    <div class="risk-box" id="detail-risk" hidden>
+      <span class="risk-ico" aria-hidden="true">⚠️</span>
+      <div>
+        <strong>这条信息需要谨慎核实</strong>
+        <p id="detail-risk-text"></p>
+      </div>
+    </div>
+
+    <div class="note-box" id="detail-notes" hidden>
+      <h3 class="detail-sub">注意事项</h3>
+      <ul id="detail-note-list"></ul>
+    </div>
+
+    <div class="detail-actions">
+      <button class="back-btn wide" type="button" data-back="activities">
+        <span class="back-ico" aria-hidden="true">←</span> 返回活动列表
+      </button>
+    </div>
+
+    <button class="detail-delete" id="detail-delete" type="button" hidden>删除这个活动</button>
+
+    <p class="detail-footnote">内容并不完全，细节请等待官方通知</p>
+  </article>
+</section>
+
+<!-- ================= 界面 5：发布你的活动 ================= -->
+<section class="scene scene-publish" id="scene-publish">
+  <div class="detail-glow" aria-hidden="true">
+    <span class="detail-blob detail-blob-1"></span>
+    <span class="detail-blob detail-blob-2"></span>
+  </div>
+
+  <div class="page-bar">
+    <button class="back-btn" type="button" data-back="activities">
+      <span class="back-ico" aria-hidden="true">←</span> 返回
+    </button>
+    <span class="publish-badge">发布你的活动</span>
+  </div>
+
+  <article class="publish-scroll">
+    <div class="publish-hero" aria-hidden="true">
+      <span class="publish-hero-bubble">发布你的活动</span>
+      <span class="hero-st" style="--x:8%;--y:18%;--s:28px;--d:4.8s;--dl:0s">📣</span>
+      <span class="hero-st" style="--x:80%;--y:12%;--s:24px;--d:5.4s;--dl:-.7s">✨</span>
+      <span class="hero-st" style="--x:6%;--y:70%;--s:26px;--d:5.1s;--dl:-1.3s">🎈</span>
+      <span class="hero-st" style="--x:84%;--y:66%;--s:22px;--d:4.6s;--dl:-.4s">💬</span>
+    </div>
+
+    <h2 class="publish-title">说说你想办什么活动</h2>
+    <p class="publish-sub">填好下面的信息，点最下面那颗按钮，就会有一个气泡吹出来飞到气泡墙上。<br>只有一个「活动名称」是必填的，其余留空也能发布。</p>
+
+    <form id="publish-form" autocomplete="off">
+      <label class="pub-field">
+        <span class="pub-label">活动名称 <em>必填</em></span>
+        <input id="pf-title" type="text" maxlength="20" placeholder="例如：周末自习搭子招募">
+      </label>
+
+      <div class="pub-field">
+        <span class="pub-label">选个图标</span>
+        <div class="emoji-picker" id="pf-emojis"></div>
+      </div>
+
+      <label class="pub-field">
+        <span class="pub-label">分类</span>
+        <select id="pf-cat"></select>
+      </label>
+
+      <label class="pub-field">
+        <span class="pub-label">一句话简介</span>
+        <input id="pf-summary" type="text" maxlength="40" placeholder="留空会自动生成一句">
+      </label>
+
+      <label class="pub-field">
+        <span class="pub-label">时间</span>
+        <input id="pf-time" type="text" maxlength="24" placeholder="例如：9 月 28 日 19:00">
+      </label>
+
+      <label class="pub-field">
+        <span class="pub-label">地点</span>
+        <input id="pf-place" type="text" maxlength="24" placeholder="例如：图书馆三层讨论间">
+      </label>
+
+      <label class="pub-field">
+        <span class="pub-label">参加方式</span>
+        <input id="pf-join" type="text" maxlength="30" placeholder="例如：扫码进群 / 直接来">
+      </label>
+
+      <label class="pub-field">
+        <span class="pub-label">面向对象</span>
+        <input id="pf-target" type="text" maxlength="24" placeholder="例如：面向全校学生">
+      </label>
+
+      <label class="pub-field">
+        <span class="pub-label">小贴士</span>
+        <input id="pf-tip" type="text" maxlength="40" placeholder="例如：记得自带水杯">
+      </label>
+
+      <p class="publish-error" id="pf-error" hidden></p>
+
+      <button class="publish-submit" type="submit">吹出这颗气泡 ✨</button>
+      <p class="publish-note">发布的内容保存在这台设备的浏览器里（换设备、清缓存后就看不到了）。</p>
+    </form>
+  </article>
+</section>
+
+<script src="js/activities.js"></script>
+<script src="js/main.js"></script>
+</body>
+</html>

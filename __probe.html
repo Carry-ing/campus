@@ -1,0 +1,599 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>渲染探测页（自动化检查用，不是页面本身）</title>
+<style>
+  html,body{margin:0;height:100%;background:#111}
+  iframe{position:absolute;inset:0;width:100%;height:100%;border:0}
+  #report{position:fixed;left:0;bottom:0;z-index:99;max-height:72vh;overflow:auto;margin:0;padding:10px;
+    background:rgba(0,0,0,.85);color:#7dffa8;font:12px/1.5 Consolas,monospace;white-space:pre}
+</style>
+</head>
+<body>
+<iframe id="fr" src="index.html"></iframe>
+<pre id="report">PROBE| PENDING</pre>
+<script>
+/*
+  在真实浏览器里把四个界面完整走一遍，把结论打印在页面上。
+  人工看：浏览器打开 /__probe.html
+  自动看：无头浏览器打开 /__probe.html，--dump-dom 后 grep "PROBE|"
+*/
+(function () {
+  var out = [];
+  // 每写一条就刷新报告：万一中途卡住/出错，也能从报告看到跑到哪一步了
+  function P(k, v) { out.push('PROBE| ' + k + ' = ' + JSON.stringify(v)); flush(); }
+  function flush() { document.getElementById('report').textContent = out.join('\n'); }
+  function wait(ms) { return new Promise(function (r) { setTimeout(r, ms); }); }
+
+  var fr = document.getElementById('fr');
+  var started = false;
+
+  // 任何未捕获的错误都打出来，别让自检页"静悄悄"停住
+  window.addEventListener('error', function (e) { P('BOOT-ERROR', String(e.message || e)); });
+  window.addEventListener('unhandledrejection', function (e) {
+    P('BOOT-ERROR', 'Promise 拒绝: ' + ((e.reason && (e.reason.stack || e.reason.message)) || e.reason));
+  });
+
+  // 启动诊断：确认脚本跑起来了、iframe 的 load 有没有触发
+  out.push('PROBE| BOOT = 脚本已解析');
+  flush();
+
+  fr.addEventListener('load', function () {
+    P('BOOT', 'iframe load 已触发, started=' + started + ', typeof run=' + typeof run);
+    // 注意：这里不要在 load 回调里再套 setTimeout 去启动 run（在这个无头环境下那个定时器
+    // 不会触发），直接启动，缓冲时间放在 run() 内部用 await wait() 等。
+    if (!started) {
+      started = true;
+      try { run(); } catch (err) { P('BOOT-ERROR', 'run() 同步抛错: ' + (err && err.message)); }
+    }
+  });
+  setTimeout(function () { if (!started) { P('FATAL', 'iframe 没有触发 load'); flush(); } }, 9000);
+
+  async function run() {
+    var fails = [];
+    function check(name, cond, detail) {
+      if (cond === true) { P(name, true); }
+      else { P(name, detail === undefined ? false : detail); fails.push(name); }
+    }
+
+    P('BOOT', 'run() 开始');
+    await wait(400);
+    try {
+      var doc = fr.contentDocument, win = fr.contentWindow;
+
+      var iframeErrors = [];
+      win.__probeErrors = iframeErrors;
+      win.addEventListener('error', function (e) { iframeErrors.push(String(e.message || e)); });
+      win.addEventListener('unhandledrejection', function (e) { iframeErrors.push('rejection: ' + e.reason); });
+
+      var $ = function (s) { return doc.querySelector(s); };
+      var $$ = function (s) { return Array.prototype.slice.call(doc.querySelectorAll(s)); };
+      var cs = function (el) { return win.getComputedStyle(el); };
+
+      /* 关掉气泡的自动飘动循环：自检页改用它自己的 tick 手动推进，
+         既是确定性的，也避免常驻 rAF 让无头浏览器的虚拟时钟停止推进
+         （那样下面的 setTimeout 等待会全部卡住）。
+         真实时间里的自动飘动由 scripts/real-click-check.ps1 负责验证。 */
+      if (win.campusPhysics && win.campusPhysics.pause) win.campusPhysics.pause();
+
+      /* 回归哨兵：拖拽代码一旦调用 setPointerCapture，浏览器会把 click 派发到
+         捕获元素（那层容器）上，气泡自己的 click 就永远收不到 —— 也就是
+         「点气泡没反应」。合成事件测不出这个行为，所以直接盯 API 调用本身。 */
+      var capturedPointer = [];
+      var origCapture = win.Element.prototype.setPointerCapture;
+      win.Element.prototype.setPointerCapture = function (id) {
+        capturedPointer.push(this.id || this.className || this.tagName);
+        return origCapture.apply(this, arguments);
+      };
+      var DATA = win.CAMPUS_ACTIVITIES || [];
+      var route = function () { return (win.location.hash || '').replace(/^#\/?/, '') || 'welcome'; };
+      var activeScene = function () {
+        var el = $('.scene.is-active');
+        return el ? el.id : null;
+      };
+
+      /* ================= 界面 1：欢迎页 ================= */
+      await wait(2200);
+      check('1.欢迎页激活', activeScene() === 'scene-gate');
+      check('1.路由是 welcome', route() === 'welcome', route());
+      check('1.标题8个字且文案正确',
+        $$('.title .ch').map(function (c) { return c.textContent; }).join('') === '欢迎进入大学校园');
+      check('1.贴图数量>=8', $$('.st').length >= 8, $$('.st').length);
+
+      var c0 = cs($$('.title .ch')[0]);
+      check('1.标题用渐变填充文字', /gradient/.test(c0.backgroundImage) && /rgba\(0, 0, 0, 0\)/.test(c0.color));
+      check('1.标题逐字可见', $$('.title .ch').every(function (c) { return Number(cs(c).opacity) > 0.9; }));
+      var btn = $('#btn-enter'), br = btn.getBoundingClientRect();
+      check('1.进入按钮在页面中间',
+        Math.abs((br.left + br.width / 2) - win.innerWidth / 2) < 3 &&
+        Math.abs((br.top + br.height / 2) - win.innerHeight / 2) < win.innerHeight * 0.25);
+      check('1.进入按钮文字是"进入"', btn.textContent.replace(/\s+/g, '') === '进入');
+      check('1.年份是 2026', /2026/.test($('.kicker').textContent), $('.kicker').textContent);
+
+      /* ================= 界面 2：三句话 ================= */
+      var lines = $$('.line');
+      check('2.三句话文案正确', lines.map(function (l) { return l.textContent; }).join('|') ===
+        '进入了大学|就代表了无限的机会和试错|有很多的活动在等待着你');
+      check('2.初始三句都没出现', lines.every(function (l) { return !l.classList.contains('is-show'); }));
+
+      /** 这一条是三句话 bug 的回归断言：
+       *  文字必须真的被裁进文字里 —— 有 is-show、颜色透明、background-clip 必须是 text、背景是渐变。
+       *  之前第 2、3 句用了 background 简写，把 background-clip 重置成 border-box，
+       *  于是渐变铺满整块、文字透明，看起来就是「没显示」。
+       *  这里不查 opacity：透明度是动画属性，无头模式下动画帧稀疏，查了会误报
+       *  （最终状态的透明度在最后单独断言）。 */
+      function linePainted(i) {
+        var el = lines[i];
+        var s = cs(el);
+        var clip = s.backgroundClip || s.webkitBackgroundClip || '';
+        return el.classList.contains('is-show') &&
+          /rgba\(0, 0, 0, 0\)/.test(s.color) &&
+          clip === 'text' &&
+          /gradient/.test(s.backgroundImage);
+      }
+      function lineInfo(i) {
+        var s = cs(lines[i]);
+        return {
+          opacity: s.opacity, color: s.color,
+          clip: s.backgroundClip || s.webkitBackgroundClip,
+          bg: String(s.backgroundImage).slice(0, 46)
+        };
+      }
+
+      btn.click();
+      await wait(1100);
+      check('2.已切到三句话界面', activeScene() === 'scene-lines');
+      check('2.路由是 intro', route() === 'intro', route());
+      check('2.第1句先出现(且只有它)',
+        lines.map(function (l) { return l.classList.contains('is-show') ? 1 : 0; }).join('') === '100');
+      check('2.第1句真的画出来了', linePainted(0), lineInfo(0));
+
+      await wait(1600);   // t≈2.7s
+      check('2.第2句接着出现',
+        lines.map(function (l) { return l.classList.contains('is-show') ? 1 : 0; }).join('') === '110');
+      check('2.★第2句真的画出来了(回归)', linePainted(1), lineInfo(1));
+
+      await wait(1600);   // t≈4.3s
+      check('2.第3句最后出现',
+        lines.map(function (l) { return l.classList.contains('is-show') ? 1 : 0; }).join('') === '111');
+      check('2.★第3句真的画出来了(回归)', linePainted(2), lineInfo(2));
+      check('2.三句话颜色各不相同',
+        new Set(lines.map(function (l) { return cs(l).backgroundImage; })).size === 3);
+      check('2.特效粒子已生成', doc.querySelectorAll('.spark').length > 0);
+      check('2.这一页有返回键', !!$('#scene-lines [data-back]'), $('#scene-lines [data-back]') ? $('#scene-lines [data-back]').dataset.back : null);
+
+      await wait(3800);   // t≈8.1s，应自动进入气泡页
+      check('3.三句讲完自动进入气泡页', activeScene() === 'scene-bubbles');
+      check('3.路由同步为 activities', route() === 'activities', route());
+
+      /* ================= 界面 3：气泡 ================= */
+      check('3.顶部文案正确', $('.bubble-header h2').textContent === '看看都有什么活动可以参加');
+      check('3.顶部文案在页面最上方', $('.bubble-header h2').getBoundingClientRect().top < win.innerHeight * 0.3);
+      check('3.这一页有返回键', !!$('#scene-bubbles [data-back]'));
+
+      await wait(2600);
+
+      var bubbles = $$('.bubble');
+      var field = $('#field'), wrap = $('#field-wrap');
+      check('3.气泡共26个', bubbles.length === 26, bubbles.length);
+      check('3.场地比屏幕大(可滑动)', field.offsetWidth > wrap.clientWidth && field.offsetHeight > wrap.clientHeight,
+        { field: [field.offsetWidth, field.offsetHeight], view: [wrap.clientWidth, wrap.clientHeight] });
+      var sizes = bubbles.map(function (b) { return b.offsetWidth; });
+      check('3.气泡尺寸不过大(110~210px)',
+        Math.min.apply(null, sizes) >= 110 && Math.max.apply(null, sizes) <= 210,
+        [Math.min.apply(null, sizes), Math.max.apply(null, sizes)]);
+      check('3.气泡是正圆', bubbles.every(function (b) { return b.offsetWidth === b.offsetHeight && /50%/.test(cs(b).borderRadius); }));
+      check('3.每个气泡都有图标和标题', bubbles.every(function (b) {
+        return b.querySelector('.bubble-emoji').textContent.trim().length > 0 &&
+               b.querySelector('.bubble-name').textContent.trim().length > 0;
+      }));
+      check('3.气泡标题各不相同', new Set(bubbles.map(function (b) { return b.querySelector('.bubble-name').textContent; })).size === 26);
+      check('3.气泡标题与你给的活动一一对应',
+        bubbles.every(function (b) {
+          var act = DATA.filter(function (a) { return a.id === Number(b.dataset.id); })[0];
+          return act && act.title === b.querySelector('.bubble-name').textContent;
+        }));
+
+      /* ★文字完整性：图标和名称的四个角都必须落在圆内，否则会被 border-radius 裁掉 */
+      var clipped = [];
+      bubbles.forEach(function (b) {
+        var br = b.getBoundingClientRect();
+        var bcx = br.left + br.width / 2;
+        var bcy = br.top + br.height / 2;
+        var rad = Math.min(br.width, br.height) / 2;
+        [b.querySelector('.bubble-emoji'), b.querySelector('.bubble-name')].forEach(function (child) {
+          var cr = child.getBoundingClientRect();
+          [[cr.left, cr.top], [cr.right, cr.top], [cr.left, cr.bottom], [cr.right, cr.bottom]].forEach(function (p) {
+            if (Math.hypot(p[0] - bcx, p[1] - bcy) > rad + 1.5) {
+              clipped.push(b.querySelector('.bubble-name').textContent);
+            }
+          });
+        });
+      });
+      check('3.★图标和文字都完整在圆内(不会被裁掉)', clipped.length === 0, clipped.slice(0, 5));
+
+      /* ★拖动时不能选中文字（否则老是选到活动名称） */
+      check('3.★气泡页不能选中文字',
+        cs(wrap).userSelect === 'none' && cs(bubbles[0]).userSelect === 'none' &&
+        cs(bubbles[0].querySelector('.bubble-name')).userSelect === 'none',
+        {
+          wrap: cs(wrap).userSelect,
+          bubble: cs(bubbles[0]).userSelect,
+          name: cs(bubbles[0].querySelector('.bubble-name')).userSelect
+        });
+
+      /* ---- 气泡能不能被点到 ----
+         说明：真正的命中测试交给 scripts/real-click-check.ps1（它用真实鼠标输入，
+         并且会断言「气泡中心命中的是气泡本身」）。这里只做确定性的结构检查：
+         场地必须能接收点击、且不能有浮层吃掉点击。
+         （iframe 里 elementsFromPoint 对 fixed 定位的命中区域在无头模式下不可靠，
+         所以不用它做判定。） */
+      var wrapRect = wrap.getBoundingClientRect();
+      check('3.气泡场地可以接收点击',
+        cs($('#scene-bubbles')).pointerEvents === 'auto' &&
+        cs(wrap).pointerEvents !== 'none' &&
+        wrapRect.width >= win.innerWidth - 1 && wrapRect.height >= win.innerHeight - 1,
+        {
+          scene: cs($('#scene-bubbles')).pointerEvents,
+          wrap: cs(wrap).pointerEvents,
+          wrapRect: [Math.round(wrapRect.width), Math.round(wrapRect.height)],
+          view: [win.innerWidth, win.innerHeight]
+        });
+      check('3.顶部/底部浮层不会挡住气泡',
+        cs($('.bubble-header')).pointerEvents === 'none' && cs($('.bubble-footer')).pointerEvents === 'none',
+        { header: cs($('.bubble-header')).pointerEvents, footer: cs($('.bubble-footer')).pointerEvents });
+      check('3.非当前界面不吃点击(退场时不会挡住新界面)',
+        cs($('#scene-gate')).pointerEvents === 'none' && cs($('#scene-detail')).pointerEvents === 'none',
+        { gate: cs($('#scene-gate')).pointerEvents, detail: cs($('#scene-detail')).pointerEvents });
+
+      /* ---- ★气泡的物理：会自己慢慢动 + 碰撞挤压 ----
+         用页面暴露的 campusPhysics.tick() 手动推进模拟，不依赖动画帧，
+         所以在无头环境里也是确定性的。
+         注意：变量名不要叫 P —— 会和上面的日志函数 P() 撞名，
+         var 提升会让整个 run() 里的 P() 变成 undefined（踩过一次）。 */
+      var phys = win.campusPhysics;
+      check('3.物理系统已就绪(26 颗活动气泡 + 1 颗发布气泡)',
+        !!phys && phys.activityCount() === 26 && phys.count() === 27,
+        phys ? [phys.activityCount(), phys.count()] : null);
+
+      var st0 = phys.state();
+      for (var t0i = 0; t0i < 40; t0i++) phys.tick(0.05);      // 模拟 2 秒
+      var st1 = phys.state();
+      var movedCount = 0, movable = 0;
+      for (var mi = 0; mi < st1.length; mi++) {
+        if (st1[mi].isStatic) continue;                        // 中央那颗发布气泡本来就不动
+        movable++;
+        if (Math.hypot(st1[mi].x - st0[mi].x, st1[mi].y - st0[mi].y) > 2) movedCount++;
+      }
+      check('3.★气泡会自己缓慢移动', movedCount >= 24, { 移动的: movedCount, 总数: movable });
+
+      var spRange = phys.speedRange();
+      var speeds = st1.map(function (s) { return Number(s.speed.toFixed(2)); });
+      check('3.★移动速率不大(不超过 ' + spRange[1] + 'px/s)',
+        speeds.every(function (v) { return v <= spRange[1] + 0.5; }),
+        { 最慢: Math.min.apply(null, speeds), 最快: Math.max.apply(null, speeds) });
+
+      // 长时间模拟：一定会撞上，撞完要能挤开、不能叠在一起
+      var collBefore = phys.collisions();
+      var minScale = 9, maxScale = 0, maxSquash = 0, sampleTransform = '';
+      for (var t1i = 0; t1i < 1200; t1i++) {
+        phys.tick(0.05);
+        // 挤压量衰减很快，必须每帧采样（隔帧采会全部漏掉）
+        var sample = phys.state();
+        for (var si = 0; si < sample.length; si++) {
+          if (sample[si].squash > maxSquash) maxSquash = sample[si].squash;
+        }
+        if (t1i % 20 === 0) {
+          $$('.bubble-holder').forEach(function (h) {
+            var raw = h.style.transform || '';
+            if (!sampleTransform) sampleTransform = raw;
+            var mm = /scale\(\s*([\d.]+)\s*,\s*([\d.]+)\s*\)/.exec(raw);
+            if (mm) {
+              minScale = Math.min(minScale, Number(mm[1]), Number(mm[2]));
+              maxScale = Math.max(maxScale, Number(mm[1]), Number(mm[2]));
+              maxScale = Math.max(maxScale, Number(mm[1]), Number(mm[2]));
+            }
+          });
+        }
+      }
+      check('3.★气泡之间会发生碰撞', phys.collisions() > collBefore, { 之前: collBefore, 之后: phys.collisions() });
+      check('3.★碰撞时会有挤压形变(不是硬邦邦的两个圆)', maxSquash > 0.05,
+        { 最大挤压量: Number(maxSquash.toFixed(3)), 样例: sampleTransform.slice(0, 60) });
+      check('3.挤压幅度克制(渲染缩放 0.88~1.12)',
+        maxScale > 0 && minScale >= 0.88 && maxScale <= 1.12,
+        { 最小缩放: Number(minScale.toFixed(3)), 最大缩放: Number(maxScale.toFixed(3)) });
+
+      var st2 = phys.state();
+      var worstOverlap = 0;
+      for (var oi = 0; oi < st2.length; oi++) {
+        for (var oj = oi + 1; oj < st2.length; oj++) {
+          var A = st2[oi], C = st2[oj];
+          var ov = (A.r + C.r) - Math.hypot(C.x - A.x, C.y - A.y);
+          if (ov > worstOverlap) worstOverlap = ov;
+        }
+      }
+      check('3.★碰撞后能挤开(不会叠在一起)', worstOverlap < 1.5, Number(worstOverlap.toFixed(2)));
+      check('3.气泡始终留在场地内(边界约束生效)',
+        st2.every(function (s) {
+          return s.x - s.r >= -0.5 && s.x + s.r <= field.offsetWidth + 0.5 &&
+                 s.y - s.r >= -0.5 && s.y + s.r <= field.offsetHeight + 0.5;
+        }));
+
+      /* ---- 拖动 & 点击判定 ---- */
+      function pointer(type, x, y) {
+        return new win.PointerEvent(type, { clientX: x, clientY: y, bubbles: true, pointerId: 7, pointerType: 'touch', button: 0 });
+      }
+      var before = field.style.transform;
+      var target = bubbles[3];
+      var tr = target.getBoundingClientRect();
+      wrap.dispatchEvent(pointer('pointerdown', tr.left + tr.width / 2, tr.top + tr.height / 2));
+      wrap.dispatchEvent(pointer('pointermove', tr.left + tr.width / 2 - 240, tr.top + tr.height / 2 - 80));
+      wrap.dispatchEvent(pointer('pointerup', tr.left + tr.width / 2 - 240, tr.top + tr.height / 2 - 80));
+      check('3.滑动会平移气泡场地', field.style.transform !== before);
+
+      target.click();
+      await wait(150);
+      check('3.滑动之后不会误触跳转', route() === 'activities', route());
+
+      await wait(400);
+
+      /* ★拖拽不能捕获指针，否则真实点击会被派发到容器上（点气泡就没反应了） */
+      check('3.★拖拽过程没有调用 setPointerCapture', capturedPointer.length === 0, capturedPointer);
+
+      /* ================= 界面 4：活动详情页 ================= */
+      target.click();
+      await wait(400);
+
+      var wantId = Number(target.dataset.id);
+      var wantAct = DATA.filter(function (a) { return a.id === wantId; })[0];
+      check('4.点气泡进入新的详情页', activeScene() === 'scene-detail');
+      check('4.路由变成 activity/<id>', route() === 'activity/' + wantId, route());
+      check('4.详情页标题与气泡一致', $('#detail-title').textContent === wantAct.title);
+      check('4.详情页显示了分类', $('#detail-cat').textContent === wantAct.cat, $('#detail-cat').textContent);
+      check('4.详情页显示了状态标签', $('#detail-status').textContent === wantAct.status, $('#detail-status').textContent);
+      check('4.状态标签用对应的配色', $('#detail-status').className.indexOf('tone-' + wantAct.tone) > -1, $('#detail-status').className);
+      check('4.详情页显示了一句话简介', $('#detail-summary').textContent === wantAct.summary);
+      check('4.信息卡数量与资料一致', $$('#detail-facts li').length === wantAct.facts.length,
+        [$$('#detail-facts li').length, wantAct.facts.length]);
+      check('4.信息卡内容与资料一致', wantAct.facts.every(function (pair, i) {
+        var li = $$('#detail-facts li')[i];
+        return li.querySelector('.k').textContent === pair[0] && li.querySelector('.v').textContent === pair[1];
+      }));
+      check('4.贴纸数量与配置一致', $$('#detail-stickers .hero-st').length === wantAct.stickers.length,
+        [$$('#detail-stickers .hero-st').length, wantAct.stickers.length]);
+      check('4.贴纸文案与配置一致',
+        $$('#detail-stickers .hero-st').map(function (s) { return s.textContent; }).join('') === wantAct.stickers.join(''));
+      check('4.贴纸有浮动动画', $$('#detail-stickers .hero-st').every(function (s) {
+        return cs(s).animationName.indexOf('stFloat') > -1;
+      }));
+      check('4.主图标就是活动的图标', $('#detail-emoji').textContent === wantAct.emoji);
+      check('4.显示了序号', $('#detail-index').textContent === '第 ' + wantId + ' / 26 个', $('#detail-index').textContent);
+
+      var foot = $('.detail-footnote');
+      check('4.底部有红字补充', !!foot && foot.textContent === '内容并不完全，细节请等待官方通知',
+        foot ? foot.textContent : null);
+      var footColor = foot ? cs(foot).color : '';
+      var rgb = /rgb\((\d+), (\d+), (\d+)\)/.exec(footColor);
+      check('4.红字是红色系',
+        !!rgb && Number(rgb[1]) > 180 && Number(rgb[1]) > Number(rgb[2]) + 40 && Number(rgb[1]) > Number(rgb[3]) + 40,
+        footColor);
+      check('4.自定义配色已生效(分类色)', cs($('#scene-detail')).getPropertyValue('--c2').trim().length > 0,
+        cs($('#scene-detail')).getPropertyValue('--c2').trim());
+      check('4.详情页能滚动且在屏幕内', $('#detail-scroll').scrollHeight > 0 && $('#detail-scroll').clientHeight > 0);
+      check('4.这一页有返回键(顶部)', !!$('#scene-detail .page-bar [data-back]'));
+      check('4.这一页有返回键(底部)', $$('#scene-detail [data-back]').length >= 2, $$('#scene-detail [data-back]').length);
+      check('4.打开详情后气泡打上对勾', target.classList.contains('is-visited'));
+      check('4.计数变1', $('#count').textContent === '1', $('#count').textContent);
+
+      /* ---- 返回键：详情页 → 气泡页 ---- */
+      $('#scene-detail .page-bar [data-back]').click();
+      await wait(400);
+      check('4.详情页返回键回到气泡页', activeScene() === 'scene-bubbles' && route() === 'activities', [activeScene(), route()]);
+      check('4.返回后气泡的拖动位置被保留', field.style.transform !== '');
+
+      /* ---- 返回键：气泡页 → 三句话 ---- */
+      $('#scene-bubbles [data-back]').click();
+      await wait(500);
+      check('5.气泡页返回键回到三句话', activeScene() === 'scene-lines' && route() === 'intro', [activeScene(), route()]);
+      check('5.再次进入时三句话直接显示', lines.every(function (l) { return l.classList.contains('is-show'); }));
+      await wait(2600);
+      check('5.★返回后不会又被自动推走(停在原页)', activeScene() === 'scene-lines' && route() === 'intro', route());
+
+      /* ---- 返回键：三句话 → 欢迎页 ---- */
+      $('#scene-lines [data-back]').click();
+      await wait(500);
+      check('5.三句话返回键回到欢迎页', activeScene() === 'scene-gate' && route() === 'welcome', [activeScene(), route()]);
+
+      /* ---- 浏览器自带的返回键 ---- */
+      win.campusGo('activities');
+      await wait(400);
+      check('5.可以再次进入气泡页', activeScene() === 'scene-bubbles');
+      win.history.back();
+      await wait(600);
+      check('5.浏览器返回键也能用', route() === 'welcome', route());
+
+      /* ================= 26 个活动逐个检查 ================= */
+      var bad = [];
+      for (var k = 0; k < DATA.length; k++) {
+        var act = DATA[k];
+        win.location.hash = '#/activity/' + act.id;
+        await wait(120);
+        var lis = $$('#detail-facts li');
+        var ok = activeScene() === 'scene-detail' &&
+          $('#detail-title').textContent === act.title &&
+          $('#detail-summary').textContent === act.summary &&
+          $('#detail-cat').textContent === act.cat &&
+          lis.length === act.facts.length &&
+          $$('#detail-stickers .hero-st').length === act.stickers.length &&
+          $('.detail-footnote').textContent === '内容并不完全，细节请等待官方通知' &&
+          $('#detail-notes').hidden === !(act.notes && act.notes.length > (act.risk ? 1 : 0)) &&
+          $('#detail-risk').hidden === !act.risk;
+        if (!ok) bad.push(act.id);
+      }
+      check('6.26 个活动详情页全部正确', bad.length === 0, '有问题的编号: ' + bad.join(','));
+
+      var a24 = DATA.filter(function (a) { return a.id === 24; })[0];
+      win.location.hash = '#/activity/24';
+      await wait(200);
+      check('6.需要核实的信息会显示风险提示', $('#detail-risk').hidden === false && $('#detail-risk-text').textContent.length > 10,
+        $('#detail-risk-text').textContent);
+      win.location.hash = '#/activity/25';
+      await wait(200);
+      check('6.第25条也有风险提示', $('#detail-risk').hidden === false);
+
+      win.location.hash = '#/activities';
+      await wait(600);
+      check('6.看完全部26个后计数为26', $('#count').textContent === '26', $('#count').textContent);
+      await wait(700);
+      check('6.全部看完有提示', !$('#toast').hidden && /26/.test($('#toast').textContent), $('#toast').textContent);
+
+      /* ================= 界面 5：发布你的活动 ================= */
+      win.location.hash = '#/activities';
+      await wait(400);
+
+      var pubBtn = $('#publish-bubble');
+      check('7.中央有「发布你的活动」白气泡',
+        !!pubBtn && pubBtn.textContent.indexOf('发布你的活动') > -1,
+        pubBtn ? pubBtn.textContent : null);
+
+      var pubRect = pubBtn ? pubBtn.getBoundingClientRect() : null;
+      var avgSize = sizes.reduce(function (a, b) { return a + b; }, 0) / sizes.length;
+      check('7.它比普通气泡大一点', !!pubRect && pubRect.width > avgSize * 1.15,
+        { 发布气泡: pubRect ? Math.round(pubRect.width) : null, 普通气泡平均: Math.round(avgSize) });
+
+      var fieldRect2 = field.getBoundingClientRect();
+      var pubDx = pubRect ? (pubRect.left + pubRect.width / 2) - (fieldRect2.left + fieldRect2.width / 2) : 999;
+      var pubDy = pubRect ? (pubRect.top + pubRect.height / 2) - (fieldRect2.top + fieldRect2.height / 2) : 999;
+      check('7.它在场地正中央', Math.abs(pubDx) < 3 && Math.abs(pubDy) < 3,
+        { 偏差x: Math.round(pubDx), 偏差y: Math.round(pubDy) });
+
+      check('7.它是白色的', !!pubBtn && /rgb\(255, 255, 255\)/.test(cs(pubBtn).backgroundImage),
+        pubBtn ? cs(pubBtn).backgroundImage.slice(0, 48) : null);
+
+      pubBtn.click();
+      await wait(400);
+      check('7.点它进入发布页', activeScene() === 'scene-publish' && route() === 'publish', [activeScene(), route()]);
+      check('7.发布页有返回键', !!$('#scene-publish [data-back]'));
+      check('7.表单字段齐全',
+        ['#pf-title', '#pf-emojis', '#pf-cat', '#pf-summary', '#pf-time', '#pf-place', '#pf-join', '#pf-target', '#pf-tip', '.publish-submit']
+          .every(function (s) { return !!$(s); }));
+      check('7.图标可以选', $$('#pf-emojis .emoji-opt').length >= 12, $$('#pf-emojis .emoji-opt').length);
+      check('7.分类可以选', $$('#pf-cat option').length >= 5, $$('#pf-cat option').length);
+
+      // 不填名字就提交：要提示，且不能离开这一页
+      $('#publish-form').dispatchEvent(new win.Event('submit', { bubbles: true, cancelable: true }));
+      await wait(200);
+      check('7.不填名字会给出提示', !$('#pf-error').hidden && activeScene() === 'scene-publish',
+        $('#pf-error').textContent);
+
+      // 填内容 → 选图标 → 提交
+      $('#pf-title').value = '周末自习搭子招募';
+      $('#pf-summary').value = '一起在图书馆三层安静自习，互相监督';
+      $('#pf-time').value = '9 月 28 日 14:00';
+      $('#pf-place').value = '图书馆三层讨论间';
+      $('#pf-join').value = '扫码进群';
+      var emojiBtns = $$('#pf-emojis .emoji-opt');
+      emojiBtns[5].click();
+      check('7.可以选中图标', emojiBtns[5].classList.contains('is-picked'), emojiBtns[5].dataset.emoji);
+
+      $('#publish-form').dispatchEvent(new win.Event('submit', { bubbles: true, cancelable: true }));
+      await wait(150);
+
+      check('7.发布后回到气泡墙', activeScene() === 'scene-bubbles' && route() === 'activities',
+        [activeScene(), route()]);
+      check('7.气泡多了一颗(26→27)', $$('.bubble').length === 27, $$('.bubble').length);
+      check('7.右上角总数也跟着变', $('#total').textContent === '27', $('#total').textContent);
+
+      var mine = win.campusState.myActivities();
+      check('7.已保存到本机(localStorage)', mine.length === 1 && mine[0].title === '周末自习搭子招募', mine);
+
+      var newBtn = null;
+      $$('.bubble').forEach(function (b) {
+        if (b.querySelector('.bubble-name').textContent === '周末自习搭子招募') newBtn = b;
+      });
+      check('7.新气泡的格式和其它气泡一样', !!newBtn &&
+        !!newBtn.querySelector('.bubble-emoji') && !!newBtn.querySelector('.bubble-name') &&
+        newBtn.classList.contains('bubble') && /50%/.test(cs(newBtn).borderRadius),
+        newBtn ? newBtn.className : null);
+      check('7.新气泡用了选中的图标',
+        !!newBtn && newBtn.querySelector('.bubble-emoji').textContent === emojiBtns[5].dataset.emoji,
+        newBtn ? newBtn.querySelector('.bubble-emoji').textContent : null);
+
+      if (newBtn) {
+        var nbr = newBtn.getBoundingClientRect();
+        var ncx = nbr.left + nbr.width / 2;
+        var ncy = nbr.top + nbr.height / 2;
+        var nrad = Math.min(nbr.width, nbr.height) / 2;
+        var okNew = [newBtn.querySelector('.bubble-emoji'), newBtn.querySelector('.bubble-name')].every(function (child) {
+          var r = child.getBoundingClientRect();
+          return [[r.left, r.top], [r.right, r.top], [r.left, r.bottom], [r.right, r.bottom]].every(function (p) {
+            return Math.hypot(p[0] - ncx, p[1] - ncy) <= nrad + 1.5;
+          });
+        });
+        check('7.新气泡的文字也完整在圆内', okNew);
+      }
+
+      // 吹气动画：新气泡应该是刚吹出来的状态，并且伴随泡泡粒子
+      var newBody = null;
+      phys.state().forEach(function (s) { if (s.title === '周末自习搭子招募') newBody = s; });
+      check('7.★新气泡是「吹出来」的(由小长大)', !!newBody && newBody.grow < 1,
+        newBody ? Number(newBody.grow.toFixed(2)) : null);
+      check('7.★吹气时有泡泡和气泡环特效',
+        doc.querySelectorAll('.puff').length > 0 || doc.querySelectorAll('.blow-ring').length > 0,
+        { 泡泡: doc.querySelectorAll('.puff').length, 气环: doc.querySelectorAll('.blow-ring').length });
+
+      for (var gi = 0; gi < 30; gi++) phys.tick(0.05);   // 推进 1.5 秒
+      var grownBody = null;
+      phys.state().forEach(function (s) { if (s.title === '周末自习搭子招募') grownBody = s; });
+      check('7.★吹大之后自己开始飘',
+        !!grownBody && grownBody.grow === 1 && grownBody.speed >= phys.speedRange()[0] - 0.5,
+        grownBody ? { grow: grownBody.grow, speed: Number(grownBody.speed.toFixed(1)) } : null);
+
+      // 新活动的详情页
+      win.location.hash = '#/activity/' + (mine[0] ? mine[0].id : 0);
+      await wait(400);
+      check('7.新活动有自己的详情页',
+        activeScene() === 'scene-detail' && $('#detail-title').textContent === '周末自习搭子招募',
+        $('#detail-title').textContent);
+      var factText = $$('#detail-facts li').map(function (li) {
+        return li.querySelector('.k').textContent + '=' + li.querySelector('.v').textContent;
+      }).join('|');
+      check('7.详情页信息与你填的一致',
+        factText === '时间=9 月 28 日 14:00|地点=图书馆三层讨论间|参加方式=扫码进群|发布方式=由本页使用者自行发布',
+        factText);
+      check('7.自己发布的活动有删除键', !$('#detail-delete').hidden);
+
+      $('#detail-delete').click();
+      await wait(150);
+      check('7.删除要二次确认', $('#detail-delete').textContent.indexOf('再点一次') > -1, $('#detail-delete').textContent);
+      $('#detail-delete').click();
+      await wait(300);
+      check('7.删除后回到气泡墙且少一颗', activeScene() === 'scene-bubbles' && $$('.bubble').length === 26,
+        { scene: activeScene(), 气泡数: $$('.bubble').length });
+      check('7.删除后本机存储也清空了', win.campusState.myActivities().length === 0);
+
+      /* ================= 其他 ================= */
+      check('2.三句话最终都完整显示(透明度=1)',
+        lines.every(function (l) { return Number(cs(l).opacity) > 0.9; }),
+        lines.map(function (l) { return cs(l).opacity; }));
+      check('2.三句话最终都裁进文字(background-clip:text)',
+        lines.every(function (l) {
+          var s = cs(l);
+          return (s.backgroundClip || s.webkitBackgroundClip) === 'text';
+        }),
+        lines.map(function (l) { var s = cs(l); return s.backgroundClip || s.webkitBackgroundClip; }));
+      check('G.页面没有横向滚动条', doc.documentElement.scrollWidth <= win.innerWidth + 1,
+        [doc.documentElement.scrollWidth, win.innerWidth]);
+      check('G.没有 JS 报错', iframeErrors.length === 0, iframeErrors);
+
+      P('SUMMARY', fails.length === 0 ? 'ALL PASS' : ('FAILED(' + fails.length + '): ' + fails.join(' | ')));
+    } catch (err) {
+      P('FATAL', String((err && err.stack) || err));
+    }
+    flush();
+  }
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,13 @@
+# 构建产物（GitHub Pages 部署时临时生成，不提交）
+_site/
+
+# 本地临时目录
+.tmp/
+
+# 临时隧道地址（每次重启都会变，没有提交意义）
+public-url.txt
+
+# 系统垃圾文件
+Thumbs.db
+Desktop.ini
+.DS_Store
