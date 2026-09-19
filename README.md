@@ -4,6 +4,26 @@
 > 自动把 `index.html` + `css/` + `js/` 发布出去（`server.js`、`__probe.html`、`scripts/`、`.shots/`
 > 只在本地用，不会上线）。站点跑在 `/仓库名/` 子路径下，页面里所有资源都是相对路径，不需要改配置。
 
+## 发布到 GitHub Pages
+
+仓库：<https://github.com/Carry-ing/campus> ・ 线上地址：<https://carry-ing.github.io/campus/>
+
+**首次发布需要手动开一次 Pages**（这是 GitHub 的限制：第一次创建 Pages 站点不允许由 Actions 代劳，
+接口会返回 `Resource not accessible by integration`）：
+
+> 打开 <https://github.com/Carry-ing/campus/settings/pages> →
+> **Build and deployment → Source** 选 **GitHub Actions** → 保存
+
+之后每次只要 `git push` 到 `main`，工作流就会自动重新构建并发布，不需要再设置。
+
+工作流做的事（`.github/workflows/pages.yml`）：
+
+1. `actions/checkout@v4` 取代码
+2. 把 `index.html`、`css/`、`js/` 复制到 `_site/`，其余开发文件不上线
+3. `configure-pages` → `upload-pages-artifact` → `deploy-pages` 发布
+
+本地想改完先看效果，就用 `node server.js`（或任何静态服务器）打开 <http://localhost:5180>。
+
 一个零依赖的纯前端体验页，四个界面串成一条线：
 
 | 界面 | 内容 | 返回键 |
