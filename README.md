@@ -1,5 +1,9 @@
 # 大学校园体验页（campus）
 
+> 纯静态站点，一键发布到 GitHub Pages：`git push` 之后由 `.github/workflows/pages.yml`
+> 自动把 `index.html` + `css/` + `js/` 发布出去（`server.js`、`__probe.html`、`scripts/`、`.shots/`
+> 只在本地用，不会上线）。站点跑在 `/仓库名/` 子路径下，页面里所有资源都是相对路径，不需要改配置。
+
 一个零依赖的纯前端体验页，四个界面串成一条线：
 
 | 界面 | 内容 | 返回键 |
